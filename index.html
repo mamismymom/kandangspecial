@@ -112,6 +112,9 @@
         .teks-token { font-size: 36px; letter-spacing: 5px; color: #d9534f; margin: 10px 0; font-family: monospace; font-weight: bold; }
         .pesan-screenshot { font-size: 16px; font-weight: bold; color: #007bff; margin-top: 15px; display: none; }
         
+        /* Pesan Lanjutan (Resume) */
+        #pesan-resume { color: #28a745; font-weight: bold; margin-top: 10px; display: none; }
+
         /* Mobile responsif */
         @media (max-width: 600px) {
             .grid-jawaban { grid-template-columns: 1fr; }
@@ -129,12 +132,12 @@
             <input type="text" id="input-nama" placeholder="Tulis Nama_Kelas" autocomplete="off">
             <br>
             <button class="btn-utama" onclick="mulaiKuis()">Mulai Latihan</button>
+            <p id="pesan-resume">Latihan sebelumnya ditemukan. Melanjutkan...</p>
         </div>
 
         <div id="layar-kuis">
             <div class="panel-atas">
-                <div class="nav-soal-container" id="wadah-navigasi">
-                    </div>
+                <div class="nav-soal-container" id="wadah-navigasi"></div>
                 <div id="timer-teks">Sisa Waktu: <span id="timer-angka">20:00</span></div>
             </div>
 
@@ -177,10 +180,11 @@
     </div>
 
     <script>
-        // --- KONFIGURASI URL APPS SCRIPT ---
+        // --- KONFIGURASI URL APPS SCRIPT TATA NAMA SENYAWA ---
         const urlGAS = "https://script.google.com/macros/s/AKfycbyDdCm5f0x1rn7BEhvcpvUYyKhi74zmNUp_7bsFkUakrRr9ml5UWDH1pJQLXCiWCPFv/exec"; 
         
         const DURASI_KUIS = 20 * 60; // 20 Menit dalam detik
+        const KUNCI_STORAGE = "kuis_tatanama_senyawa_save"; // NAMA KUNCI SPESIFIK UNTUK KUIS INI
 
         const dataSoal = [
             { teks: "Nama senyawa dari NaCl adalah …", pilihan: [{t: "Natrium klorat", b: false}, {t: "Natrium klorida", b: true}, {t: "Natrium klorit", b: false}, {t: "Natrium klorin", b: false}] },
@@ -197,24 +201,60 @@
 
         let namaSiswa = "";
         let indeksSoal = 0;
-        let waktuMulai = 0;
         let sisaDetik = DURASI_KUIS;
         let intervalTimer;
 
-        // Persiapan data
-        dataSoal.forEach(soal => {
-            soal.pilihanAcak = acakArray(soal.pilihan); // Acak opsi sekali di awal
-            soal.jawabanDipilih = null; // Menyimpan teks jawaban yang diklik siswa
-        });
+        // --- SISTEM AUTO-SAVE (LOCALSTORAGE) ---
+        
+        window.onload = function() {
+            const dataSimpanan = localStorage.getItem(KUNCI_STORAGE);
+            if (dataSimpanan) {
+                const progres = JSON.parse(dataSimpanan);
+                namaSiswa = progres.namaSiswa;
+                indeksSoal = progres.indeksSoal;
+                sisaDetik = progres.sisaDetik;
+                
+                for (let i = 0; i < dataSoal.length; i++) {
+                    dataSoal[i].pilihanAcak = progres.dataSoal[i].pilihanAcak;
+                    dataSoal[i].jawabanDipilih = progres.dataSoal[i].jawabanDipilih;
+                }
+
+                document.getElementById("pesan-resume").style.display = "block";
+                setTimeout(() => {
+                    document.getElementById("layar-awal").style.display = "none";
+                    document.getElementById("layar-kuis").style.display = "block";
+                    jalankanTimer();
+                    renderNavigasi();
+                    muatSoal(indeksSoal);
+                }, 1000);
+            } else {
+                dataSoal.forEach(soal => {
+                    soal.pilihanAcak = acakArray(soal.pilihan); 
+                    soal.jawabanDipilih = null; 
+                });
+            }
+        };
+
+        function simpanProgres() {
+            const progres = {
+                namaSiswa: namaSiswa,
+                indeksSoal: indeksSoal,
+                sisaDetik: sisaDetik,
+                dataSoal: dataSoal
+            };
+            localStorage.setItem(KUNCI_STORAGE, JSON.stringify(progres));
+        }
+
+        // --- LOGIKA KUIS ---
 
         function mulaiKuis() {
             namaSiswa = document.getElementById("input-nama").value.trim();
             if (!namaSiswa) return alert("Silakan isi nama Anda!");
 
-            waktuMulai = Date.now();
             document.getElementById("layar-awal").style.display = "none";
             document.getElementById("layar-kuis").style.display = "block";
 
+            simpanProgres(); 
             jalankanTimer();
             renderNavigasi();
             muatSoal(0);
@@ -227,6 +267,8 @@
                 let detik = sisaDetik % 60;
                 document.getElementById("timer-angka").innerText = 
                     (menit < 10 ? "0" : "") + menit + ":" + (detik < 10 ? "0" : "") + detik;
+
+                if (sisaDetik % 5 === 0) simpanProgres();
 
                 if (sisaDetik <= 0) {
                     clearInterval(intervalTimer);
@@ -274,11 +316,13 @@
             document.getElementById("btn-prev").style.visibility = (indeksSoal === 0) ? "hidden" : "visible";
             document.getElementById("btn-next").style.visibility = (indeksSoal === dataSoal.length - 1) ? "hidden" : "visible";
             
+            simpanProgres(); 
             renderNavigasi(); 
         }
 
         function pilihJawaban(teksPilihan) {
             dataSoal[indeksSoal].jawabanDipilih = teksPilihan;
+            simpanProgres(); 
             muatSoal(indeksSoal); 
         }
 
@@ -327,8 +371,13 @@
                 headers: { "Content-Type": "text/plain;charset=utf-8" },
                 body: JSON.stringify(paketData)
             })
-            .then(() => tampilkanSertifikat(persentase, waktuPakai, token, timestamp, true))
-            .catch(() => tampilkanSertifikat(persentase, waktuPakai, token, timestamp, false));
+            .then(() => {
+                localStorage.removeItem(KUNCI_STORAGE); 
+                tampilkanSertifikat(persentase, waktuPakai, token, timestamp, true);
+            })
+            .catch(() => {
+                tampilkanSertifikat(persentase, waktuPakai, token, timestamp, false);
+            });
         }
 
         function tampilkanSertifikat(skor, waktu, token, ts, sukses) {
